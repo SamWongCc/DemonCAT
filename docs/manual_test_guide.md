@@ -19,9 +19,14 @@
 | `rNET_down` | network | 若在管理网卡上执行，SSH 立即断连 | 带外管理（IPMI/串口）恢复 `ip link set <iface> up` |
 | `rNET_service_stop` | network | 若停止 sshd/networking 服务，完全失联 | 物理登录重启服务 |
 | `rNET_degrade` | network | 需要真实物理网卡，dummy/veth 不支持 | — |
+| `rSYS_panic` | system | 触发 kernel panic，系统立即重启，不可恢复 | 重启后自行恢复（需先 `echo 1 > /proc/sys/kernel/sysrq`） |
+| `rSYS_poweroff` | system | 机器直接下电，远程完全失联 | 物理上电 / `ipmitool chassis power on` |
+| `rDISK_loss` | storage | 摘盘后该盘从系统消失，clean 需 rescan 才恢复 | `echo "- - -" > /sys/class/scsi_host/host*/scan` 重扫 |
+| `rDISK_scsi_error` | storage | 需 `CONFIG_FAIL_MAKE_REQUEST`+debugfs，对在用盘危险 | `echo 0 > /sys/block/<dev>/make-it-fail` |
+| `rCPU_core_hang` | cpu | RT 优先级独占核，钉在管理核可能影响系统调度 | clean 杀 RT 进程；或 `pkill -f 'while :; do :; done'` |
 
-> 其余 29 条故障均由自动化测试覆盖（`ctest` 14 项 + `smoke_root.sh` 10+ 项）。
-> NPU 硬件就绪时，20 条 rNPU_* 也可纳入 `smoke_root.sh` 自动化测试。
+> 其余 52 条故障均由自动化测试覆盖（`ctest` 18 项 + `smoke_root.sh` 10+ 项）。
+> NPU 硬件就绪时，24 条 rNPU_* 也可纳入 `smoke_root.sh` 自动化测试（含批次2 的 4 条 NPU 新故障，未在真实环境测试，需在 Atlas NPU 上验证子命令）。
 
 ## 手动测试流程
 
