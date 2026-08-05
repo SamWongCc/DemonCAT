@@ -9,33 +9,20 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <signal.h>
-#include <sys/types.h>
-#include <glob.h>
+#include <poll.h>
 
 #define CK(cond) do { if (!(cond)) { fprintf(stderr, "FAIL: %s\n", #cond); return 1; } } while (0)
 
-/* Count alive rDISK_write_overload worker subshells by scanning dcat pidfiles
- * (/tmp/dcat-rDISK_write_overload-<dev>.pid, space-separated PIDs per file) + kill -0 probe.
- * Immune to stray dd processes from other sources. */
-static int count_writers(void) {
-    glob_t g;
-    if (glob("/tmp/dcat-rDISK_write_overload-*.pid", 0, NULL, &g) != 0) {
-        globfree(&g);
-        return 0;
-    }
-    int count = 0;
-    for (size_t i = 0; i < g.gl_pathc; i++) {
-        FILE *f = fopen(g.gl_pathv[i], "r");
-        if (!f) continue;
-        int pid = 0;
-        while (fscanf(f, "%d", &pid) == 1) {
-            if (pid > 0 && kill(pid, 0) == 0) count++;
-        }
-        fclose(f);
-    }
-    globfree(&g);
-    return count;
+/* 数 stress 文件数，验证磁盘写入是否已产生。
+ * 不依赖 dd 进程实时存活（tmpfs 上 dd 瞬间完成），
+ * 而是检查注入产生的持久化证据——stress 文件。 */
+static int count_stress_files(void) {
+    FILE *f = popen("ls /tmp/dcat.stress.* 2>/dev/null | wc -l", "r");
+    if (!f) return -1;
+    int n = 0;
+    fscanf(f, "%d", &n);
+    pclose(f);
+    return n;
 }
 
 static void smoke_setup(void) {
@@ -52,9 +39,10 @@ static void smoke_teardown(void) {
     state_reset();
     state_set_file("");
     unlink("/tmp/dcat_smoke_storage.json");
-    unlink("/tmp/dcat-rDISK_write_overload-*.pid");
-    unlink("/tmp/dcat.write.*");
-    unlink("/tmp/dcat-rNET_port_occupy-*.pid");
+    /* unlink() 不支持 glob，需用 shell 通配清理 */
+    system("rm -f /tmp/dcat-rDISK_write_overload-*.pid");
+    system("rm -f /tmp/dcat.write.* /tmp/dcat.stress.*");
+    system("rm -f /tmp/dcat-rNET_port_occupy-*.pid");
 }
 
 int main(void) {
@@ -72,7 +60,8 @@ int main(void) {
         result_free(r);
 
         sleep(2);
-        int n = count_writers();
+        /* workers=2 应产生 2 个 stress 文件（进程会瞬间完成，文件是持久证据） */
+        int n = count_stress_files();
         CK(n >= 2);
 
         r = dispatch_route("rDISK_write_overload", "clean", &p);
@@ -80,7 +69,8 @@ int main(void) {
         result_free(r);
 
         sleep(1);
-        n = count_writers();
+        /* 清理后 stress 文件应被删除 */
+        n = count_stress_files();
         CK(n == 0);
     }
 
