@@ -602,12 +602,11 @@ NPU 模块面向华为 Atlas 系列 NPU 芯片，通过 `hccn_tool` 对 RoCE 网
 **① 确认可注入的芯片与 RoCE 网口名 `dev`**
 
 ```bash
-npu-smi info                      # 查看本机 NPU 拓扑，确认 0-7 内可用的芯片
-hccn_tool -i 2 -t                 # 查询芯片 2 的 RoCE 网口名，输出形如 eth2
-ip addr show | grep -A2 "eth2"    # 在内核侧确认该网口存在
+npu-smi info                          # 查看本机 NPU 拓扑，确认 0-8 内可用的芯片
+hccn_tool -i 2 -local_lldp -g         # 查询芯片 2 的 RoCE 网口名，输出含 "Interface <n> as eth2"
 ```
 
-> **关键**：`hccn_tool` 的 `dev` 是 **NPU 内部网卡名（如 chip2 → `eth2`）**，不是 Linux 系统接口名（如 `enp125s0f1`）。错误使用 `eth0` 会导致 `-arp -a` 等命令注入失败。务必用 `hccn_tool -i <chip> -t` 查出真实网口名。
+> **关键**：`hccn_tool` 的 `dev` 是 **NPU 内部网卡名（如 chip2 → `eth2`）**，不是 Linux 系统接口名（如 `enp125s0f1`，`ip addr` 里看不到 eth2）。网口名填错会导致 `-arp -a` 等命令注入失败。**查询方法**：`hccn_tool -i <chip> -local_lldp -g`，在输出中找 `Port Description TLV` 下的 `Interface <n> as eth<n>`（如 chip 2 显示 `Interface 2 as eth2`）。**前提**：该命令依赖 LLDP 协商，若交换机未启用 LLDP 可能无输出，此时可参考 `hccn_tool -i <chip> -mac -g` 的 MAC 与 `-local_lldp -g` 的 Port ID 对照，或按芯片号 `eth<n>` 的约定推断（本机 0-7 芯片分别对应 eth0-eth7）。
 
 **② 查询 NPU IP 与掩码（确定网段）**
 
@@ -779,7 +778,7 @@ dcat clean rNPU_netdetect_change --chip=0
 **使用示例**:
 ```bash
 # ① 查出目标芯片的 RoCE 网口名（见「④ 前置参数查询」①）：示例中芯片 2 为 eth2
-hccn_tool -i 2 -t          # 输出 eth2
+hccn_tool -i 2 -local_lldp -g   # 输出含 "Interface 2 as eth2"
 
 # ② 向该网口注入一条伪造 ARP（ip 选用 NPU 网段内一个未被占用的地址）
 dcat inject rNPU_arp_poison --chip=2 --dev=eth2 --ip=10.30.12.200 --mac=00:11:22:33:44:55
@@ -787,13 +786,13 @@ dcat query rNPU_arp_poison --chip=2 --dev=eth2 --ip=10.30.12.200 --mac=00:11:22:
 dcat clean rNPU_arp_poison --chip=2 --dev=eth2 --ip=10.30.12.200 --mac=00:11:22:33:44:55
 ```
 
-> **参数说明**：`dev` 必须用 `hccn_tool -i <chip> -t` 查出的真实网口名（示例为 eth2，勿用 eth0）；`ip` 用 NPU 同网段内未占用的地址。
+> **参数说明**：`dev` 必须用 `hccn_tool -i <chip> -local_lldp -g` 查出的真实网口名（示例为 eth2，勿用 eth0）；`ip` 用 NPU 同网段内未占用的地址。
 
 **参数可选范围**:
 | 参数 | 是否必填 | 类型 | 说明 |
 |---|---|---|---|
 | chip | 必填 | 0-7 | NPU 芯片号 |
-| dev | 必填 | 字符串 | 网卡设备名（**NPU 内部名**，用 `hccn_tool -i <chip> -t` 查询，示例为 eth2，勿用 eth0） |
+| dev | 必填 | 字符串 | 网卡设备名（**NPU 内部名**，用 `hccn_tool -i <chip> -local_lldp -g` 查询，示例为 eth2，勿用 eth0） |
 | ip | 必填 | IPv4 | 被 poisoning 的目标 IP |
 | mac | 必填 | MAC | 伪造的错误 MAC 地址 |
 
@@ -826,13 +825,13 @@ dcat query rNPU_arp_del --chip=2 --dev=eth2 --ip=10.30.12.200
 dcat clean rNPU_arp_del --chip=2 --dev=eth2 --ip=10.30.12.200
 ```
 
-> **参数说明**：`dev` 用 `hccn_tool -i <chip> -t` 查出的真实网口名；`ip` 用 NPU 同网段未占用地址。
+> **参数说明**：`dev` 用 `hccn_tool -i <chip> -local_lldp -g` 查出的真实网口名；`ip` 用 NPU 同网段未占用地址。
 
 **参数可选范围**:
 | 参数 | 是否必填 | 类型 | 说明 |
 |---|---|---|---|
 | chip | 必填 | 0-7 | NPU 芯片号 |
-| dev | 必填 | 字符串 | NPU 内部网卡设备名（用 `hccn_tool -i <chip> -t` 查询，示例为 eth2，勿用 eth0） |
+| dev | 必填 | 字符串 | NPU 内部网卡设备名（用 `hccn_tool -i <chip> -local_lldp -g` 查询，示例为 eth2，勿用 eth0） |
 | ip | 必填 | IPv4 | 要删除 ARP 表项的 IP |
 
 **危险等级**: 中 — 删除后流量短暂停滞，通常可通过 ARP 重新学习自愈。
@@ -1001,7 +1000,7 @@ dcat query rNPU_iproute_add --chip=2
 dcat clean rNPU_iproute_add --chip=2 --ip=10.30.50.0 --ip_mask=24 --table=100
 ```
 
-> **参数说明**：`via` 用真实网关；`dev` 用 `hccn_tool -i <chip> -t` 查出的真实网口名；`ip` 选一个未占用的目标网段；`table` 用未被占用的表号。
+> **参数说明**：`via` 用真实网关；`dev` 用 `hccn_tool -i <chip> -local_lldp -g` 查出的真实网口名；`ip` 选一个未占用的目标网段；`table` 用未被占用的表号。
 
 **参数可选范围**:
 | 参数 | 是否必填 | 类型 | 说明 |
@@ -1010,12 +1009,12 @@ dcat clean rNPU_iproute_add --chip=2 --ip=10.30.50.0 --ip_mask=24 --table=100
 | ip | 必填 | IPv4 | 目标网段地址（如 `10.30.50.0`，须未使用、不与 NPU 网段冲突） |
 | ip_mask | 必填 | 整数 0-32 | **CIDR 位数**（如 `24` 表示 /24），不是点分掩码 |
 | via | 必填 | IPv4 | 下一跳地址，**必须与 NPU 当前 IP 同网段** |
-| dev | 必填 | 字符串 | NPU 内部网卡名（用 `hccn_tool -i <chip> -t` 查询，示例为 eth2，非 Linux 接口名） |
+| dev | 必填 | 字符串 | NPU 内部网卡名（用 `hccn_tool -i <chip> -local_lldp -g` 查询，示例为 eth2，非 Linux 接口名） |
 | table | 必填 | 整数 0-255 | 路由表编号 |
 
 **危险等级**: 中 — 添加路由可能改变选路结果。
 
-**补充说明**: 需要 hccn_tool + Atlas NPU 硬件、需要 root。**ip_mask 是 CIDR 位数**（0-32），不是点分十进制掩码（如 `255.255.255.0`→`24`）。**via 网段匹配**：via 必须与 NPU IP 同网段。**dev 是 NPU 内部名**：示例为 `eth2`，用 `hccn_tool -i <chip> -t` 查询，不是 Linux 系统接口名（如 `enp125s0f1`）。**目标网段冲突**：`ip` 与已存在路由冲突会使 query 断言失败。
+**补充说明**: 需要 hccn_tool + Atlas NPU 硬件、需要 root。**ip_mask 是 CIDR 位数**（0-32），不是点分十进制掩码（如 `255.255.255.0`→`24`）。**via 网段匹配**：via 必须与 NPU IP 同网段。**dev 是 NPU 内部名**：示例为 `eth2`，用 `hccn_tool -i <chip> -local_lldp -g` 查询，不是 Linux 系统接口名（如 `enp125s0f1`）。**目标网段冲突**：`ip` 与已存在路由冲突会使 query 断言失败。
 
 ---
 
