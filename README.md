@@ -43,8 +43,8 @@ bash scripts/install_deps.sh
 # 2. 编译（8核并行加速）
 cmake -B build && cmake --build build -j8
 
-# 3. 运行测试 （cmake>=3.20可直接执行，其它版本需在build目录下执行）
-ctest --test-dir build --output-on-failure
+# 3. 运行测试
+cd build && ctest --output-on-failure
 
 # 4. 全局可用（二选一）
 sudo ln -sf $(pwd)/build/dcat /usr/local/bin/dcat   # 之后直接用 dcat 命令
